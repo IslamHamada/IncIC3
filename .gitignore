@@ -6,3 +6,13 @@ minisat/
 IC3
 
 LICENSE
+
+my_smv/
+
+aiger.o
+
+IC3.o
+
+main.o
+
+Model.o
