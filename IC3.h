@@ -30,7 +30,7 @@ namespace IC3 {
 
     // A CubeSet is a set of ordered (by integer value) vectors of
     // Minisat::Lits.
-    static bool _LitVecComp(const LitVec & v1, const LitVec & v2) {
+    static bool _LitVecComp(const LitVec &v1, const LitVec &v2) {
         if (v1.size() < v2.size()) return true;
         if (v1.size() > v2.size()) return false;
         for (size_t i = 0; i < v1.size(); ++i) {
@@ -39,15 +39,17 @@ namespace IC3 {
         }
         return false;
     }
-    static bool _LitVecEq(const LitVec & v1, const LitVec & v2) {
+
+    static bool _LitVecEq(const LitVec &v1, const LitVec &v2) {
         if (v1.size() != v2.size()) return false;
         for (size_t i = 0; i < v1.size(); ++i)
             if (v1[i] != v2[i]) return false;
         return true;
     }
+
     class LitVecComp {
     public:
-        bool operator()(const LitVec & v1, const LitVec & v2) {
+        bool operator()(const LitVec &v1, const LitVec &v2) {
             return _LitVecComp(v1, v2);
         }
     };
@@ -68,6 +70,7 @@ namespace IC3 {
     struct Obligation {
         Obligation(size_t st, size_t l, size_t d) :
                 state(st), level(l), depth(d) {}
+
         size_t state;  // Generalize this state...
         size_t level;  // ... relative to this level.
         size_t depth;  // Length of CTI suffix to error.
@@ -79,12 +82,12 @@ namespace IC3 {
     struct Frame {
         size_t k;             // steps from initial state
         CubeSet borderCubes;  // additional cubes in this and previous frames
-        Minisat::Solver * consecution;
+        Minisat::Solver *consecution;
     };
 
     class ObligationComp {
     public:
-        bool operator()(const Obligation & o1, const Obligation & o2) {
+        bool operator()(const Obligation &o1, const Obligation &o2) {
             if (o1.level < o2.level) return true;  // prefer lower levels (required)
             if (o1.level > o2.level) return false;
             if (o1.depth < o2.depth) return true;  // prefer shallower (heuristic)
@@ -93,12 +96,13 @@ namespace IC3 {
             return false;
         }
     };
+
     typedef set<Obligation, ObligationComp> PriorityQueue;
 
-  bool check(Model & model, 
-             int verbose = 0,       // 0: silent, 1: stats, 2: informative
-             bool basic = false,    // simple inductive generalization
-             bool random = false);  // random runs for statistical profiling
+    bool check(Model &model,
+               int verbose = 0,       // 0: silent, 1: stats, 2: informative
+               bool basic = false,    // simple inductive generalization
+               bool random = false);  // random runs for statistical profiling
 
 }
 
