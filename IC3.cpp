@@ -165,10 +165,17 @@ namespace IC3 {
             while (true) {
                 if (verbose > 1) cout << "Level " << k << endl;
                 extend();                         // push frontier frame
-                if (!strengthen()) return false;  // strengthen to remove bad successors
-                if (propagate()) return true;     // propagate clauses; check for proof
+                if (!strengthen()){
+                    print_frames(frames);
+                    return false;  // strengthen to remove bad successors
+                }
+                if (propagate()){
+                    print_frames(frames);
+                    return true;     // propagate clauses; check for proof
+                }
                 printStats();
                 ++k;                              // increment frontier
+                print_frames(frames);
             }
         }
 
