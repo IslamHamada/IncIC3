@@ -253,22 +253,33 @@ Var var(const aiger_symbol *syms, size_t i, const char prefix,
         ss << prefix << i;
     if (prime)
         ss << "'";
-    return Var(ss.str());
+//    return Var(ss.str());
+    return Var(ss.str(), sym.lit/2);
 }
 
-Minisat::Lit lit(const VarVec &vars, unsigned int l) {
-    return vars[l >> 1].lit(aiger_sign(l));
+Minisat::Lit lit(const VarVec &vars, vector<int> varToOrderIndex, unsigned int l) {
+    int var = varToOrderIndex[l/2];
+    return Minisat::mkLit(var, aiger_sign(l));
+//    return vars[l >> 1].lit(aiger_sign(l));
 }
 
 Model *modelFromAiger(aiger *aig, unsigned int propertyIndex) {
+    vector<int> varToOrderIndex(aig->maxvar + 1);
     VarVec vars(1, Var("false"));
+
     LitVec init, constraints, nextStateFns;
 
     // declare primary inputs and latches
-    for (size_t i = 0; i < aig->num_inputs; ++i)
+    for (size_t i = 0; i < aig->num_inputs; ++i) {
         vars.push_back(var(aig->inputs, i, 'i'));
-    for (size_t i = 0; i < aig->num_latches; ++i)
+        Var last = vars.back();
+        varToOrderIndex[last.aiger_var()] = last.index();
+    }
+    for (size_t i = 0; i < aig->num_latches; ++i) {
         vars.push_back(var(aig->latches, i, 'l'));
+        Var last = vars.back();
+        varToOrderIndex[last.aiger_var()] = last.index();
+    }
 
     // the AND section
     AigVec aigv;
@@ -276,11 +287,13 @@ Model *modelFromAiger(aiger *aig, unsigned int propertyIndex) {
         // 1. create a representative
         stringstream ss;
         ss << 'r' << i;
-        vars.push_back(Var(ss.str()));
+        vars.push_back(Var(ss.str(), aig->ands[i].lhs/2));
+        Var last = vars.back();
+        varToOrderIndex[last.aiger_var()] = last.index();
         const Var &rep = vars.back();
         // 2. obtain arguments of AND as lits
-        Minisat::Lit l0 = lit(vars, aig->ands[i].rhs0);
-        Minisat::Lit l1 = lit(vars, aig->ands[i].rhs1);
+        Minisat::Lit l0 = lit(vars, varToOrderIndex, aig->ands[i].rhs0);
+        Minisat::Lit l1 = lit(vars, varToOrderIndex, aig->ands[i].rhs1);
         // 3. add AIG row
         aigv.push_back(AigRow(rep.lit(false), l0, l1));
     }
@@ -293,12 +306,12 @@ Model *modelFromAiger(aiger *aig, unsigned int propertyIndex) {
         if (r < 2)
             init.push_back(latch.lit(r == 0));
         // next-state function
-        nextStateFns.push_back(lit(vars, aig->latches[i].next));
+        nextStateFns.push_back(lit(vars, varToOrderIndex, aig->latches[i].next));
     }
 
     // invariant constraints
     for (size_t i = 0; i < aig->num_constraints; ++i)
-        constraints.push_back(lit(vars, aig->constraints[i].lit));
+        constraints.push_back(lit(vars, varToOrderIndex, aig->constraints[i].lit));
 
     // acquire error from given propertyIndex
     if ((aig->num_bad > 0 && aig->num_bad <= propertyIndex)
@@ -308,8 +321,8 @@ Model *modelFromAiger(aiger *aig, unsigned int propertyIndex) {
     }
     Minisat::Lit err =
             aig->num_bad > 0
-            ? lit(vars, aig->bad[propertyIndex].lit)
-            : lit(vars, aig->outputs[propertyIndex].lit);
+            ? lit(vars, varToOrderIndex, aig->bad[propertyIndex].lit)
+            : lit(vars, varToOrderIndex, aig->outputs[propertyIndex].lit);
 
     size_t offset = 0;
     return new Model(vars,

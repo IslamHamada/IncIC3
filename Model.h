@@ -61,6 +61,12 @@ public:
         _name = name;
     }
 
+    Var(const string name, Minisat::Var var) {
+        _var = gvi++;
+        _name = name;
+        _aiger_var = var;
+    }
+
     size_t index() const { return (size_t) _var; }
 
     Minisat::Var var() const { return _var; }
@@ -71,10 +77,13 @@ public:
 
     string name() const { return _name; }
 
+    int aiger_var() const {return _aiger_var;}
+
 private:
     static Minisat::Var gvi;  // aligned with solvers
     Minisat::Var _var;        // corresponding Minisat::Var in *any* solver
     string _name;
+    int _aiger_var;
 };
 
 typedef vector<Var> VarVec;
