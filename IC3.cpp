@@ -165,10 +165,17 @@ namespace IC3 {
             while (true) {
                 if (verbose > 1) cout << "Level " << k << endl;
                 extend();                         // push frontier frame
-                if (!strengthen()) return false;  // strengthen to remove bad successors
-                if (propagate()) return true;     // propagate clauses; check for proof
+                if (!strengthen()){
+                    print_frames(frames);
+                    return false;  // strengthen to remove bad successors
+                }
+                if (propagate()){
+                    print_frames(frames);
+                    return true;     // propagate clauses; check for proof
+                }
                 printStats();
                 ++k;                              // increment frontier
+                print_frames(frames);
             }
         }
 
@@ -611,9 +618,11 @@ namespace IC3 {
 
         // Process obligations according to priority.
         bool handleObligations(PriorityQueue obls) {
+            cout << "Handling Obligations: Begin >>>>>" << endl;
             while (!obls.empty()) {
                 PriorityQueue::iterator obli = obls.begin();
                 Obligation obl = *obli;
+                print_cube(state(obl.state).latches);
                 LitVec core;
                 size_t predi;
                 // Is the obligation fulfilled?
@@ -622,7 +631,12 @@ namespace IC3 {
                     // Yes, so generalize and possibly produce a new obligation
                     // at a higher level.
                     obls.erase(obli);
+                    cout << "core"<< endl;
+                    print_cube(core);
                     size_t n = generalize(obl.level, core);
+                    cout << "generalized" << endl;
+                    print_cube(core);
+                    cout << "state generalized <<< \n" << endl;
                     if (n <= k)
                         obls.insert(Obligation(obl.state, n, obl.depth));
                 } else if (obl.level == 0) {
