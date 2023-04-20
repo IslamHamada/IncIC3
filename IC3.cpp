@@ -801,10 +801,9 @@ namespace IC3 {
     }
 
     // External function to make the magic happen.
-    bool check(Model &model, int verbose, bool basic, bool random) {
+    bool check(Model &model, IC3& ic3, int verbose, bool basic, bool random) {
         if (!baseCases(model))
             return false;
-        IC3 ic3(model);
         ic3.verbose = verbose;
         if (basic) {
             ic3.maxDepth = 0;
@@ -817,5 +816,4 @@ namespace IC3 {
         if (verbose) ic3.printStats();
         return rv;
     }
-
-}
+};

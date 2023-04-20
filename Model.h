@@ -237,6 +237,10 @@ public:
     // if a cube has an initial state.
     bool isInitial(const LitVec &latches);
 
+    VarVec getVars() const{
+        return vars;
+    }
+
 private:
     VarVec vars;
     const size_t inputs, latches, reps, primes;

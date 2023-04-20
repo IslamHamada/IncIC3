@@ -100,39 +100,42 @@ namespace IC3 {
     typedef set<Obligation, ObligationComp> PriorityQueue;
 
     bool check(Model &model,
+               IC3& ic3,
                int verbose = 0,       // 0: silent, 1: stats, 2: informative
                bool basic = false,    // simple inductive generalization
                bool random = false);  // random runs for statistical profiling
 
-    static void print_lit(Minisat::Lit l){
-        if(Minisat::sign(l)){
+    static void print_lit(Minisat::Lit l, VarVec vars) {
+        if (Minisat::sign(l)) {
             cout << "!";
         }
-        cout << var(l) << ", ";
+        cout << vars[var(l)].name() << ", ";
     }
 
-    static void print_cube(LitVec s){
+    static void print_cube(LitVec s, VarVec vars) {
         cout << "{";
-        for(Minisat::Lit l : s){
-            print_lit(l);
+        for (Minisat::Lit l: s) {
+            print_lit(l, vars);
         }
         cout << "}";
         cout << endl;
     }
 
-    static void print_frame(Frame f){
+    static void print_frame(Frame f, VarVec vars) {
+        cout << "\t";
         cout << "Frame index: " << f.k << endl;
         CubeSet cs = f.borderCubes;
-        for(LitVec c : cs){
-            print_cube(c);
+        for (LitVec c: cs) {
+            cout << "\t";
+            print_cube(c, vars);
         }
         cout << endl << endl;
     }
 
-    static void print_frames(vector<Frame> f){
-        for(int i = 0; i < f.size(); i++){
+    static void print_frames(vector<Frame> f, VarVec vars) {
+        for (int i = 0; i < f.size(); i++) {
             Frame x = f[i];
-            print_frame(x);
+            print_frame(x, vars);
         }
         cout << "<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
     }

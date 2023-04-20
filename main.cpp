@@ -69,7 +69,10 @@ int main(int argc, char **argv) {
     if (!model) return 0;
 
     // model check it
-    bool rv = IC3::check(*model, verbose, basic, random);
+    IC3::IC3 ic3(*model);
+    bool rv = IC3::check(*model, ic3, verbose, basic, random);
+    cout << !rv << endl;
+    rv = IC3::check(*model, ic3, verbose, basic, random);
     // print 0/1 according to AIGER standard
     cout << !rv << endl;
 
