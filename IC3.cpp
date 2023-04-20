@@ -128,585 +128,655 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 namespace IC3 {
 
-    IC3::IC3(Model &_model) :
-            verbose(0), random(false), model(_model), k(1), nextState(0),
-            litOrder(), slimLitOrder(),
-            numLits(0), numUpdates(0), maxDepth(1), maxCTGs(3),
-            maxJoins(1 << 20), micAttempts(3), cexState(0), nQuery(0), nCTI(0), nCTG(0),
-            nmic(0), satTime(0), nCoreReduced(0), nAbortJoin(0), nAbortMic(0) {
-        slimLitOrder.heuristicLitOrder = &litOrder;
+    class IC3 {
+    public:
+        IC3(Model &_model) :
+                verbose(0), random(false), model(_model), k(1), nextState(0),
+                litOrder(), slimLitOrder(),
+                numLits(0), numUpdates(0), maxDepth(1), maxCTGs(3),
+                maxJoins(1 << 20), micAttempts(3), cexState(0), nQuery(0), nCTI(0), nCTG(0),
+                nmic(0), satTime(0), nCoreReduced(0), nAbortJoin(0), nAbortMic(0) {
+            slimLitOrder.heuristicLitOrder = &litOrder;
 
-        // construct lifting solver
-        lifts = model.newSolver();
-        // don't assert primed invariant constraints
-        model.loadTransitionRelation(*lifts, false);
-        // assert notInvConstraints (in stateOf) when lifting
-        notInvConstraints = Minisat::mkLit(lifts->newVar());
-        Minisat::vec<Minisat::Lit> cls;
-        cls.push(~notInvConstraints);
-        for (LitVec::const_iterator i = model.invariantConstraints().begin();
-             i != model.invariantConstraints().end(); ++i)
-            cls.push(model.primeLit(~*i));
-        lifts->addClause_(cls);
-    }
-
-    IC3::~IC3() {
-        for (vector<Frame>::const_iterator i = frames.begin();
-             i != frames.end(); ++i)
-            if (i->consecution) delete i->consecution;
-        delete lifts;
-    }
-
-    // The main loop.
-    bool IC3::check() {
-        startTime = time();  // stats
-        while (true) {
-            if (verbose > 1) cout << "Level " << k << endl;
-//                cout << "Extending: " << endl;
-            extend();                         // push frontier frame
-//                print_frames(frames, model.getVars());
-            cout << "Strengthening: " << endl;
-            if (!strengthen()) {
-                print_frames(frames, model.getVars());
-                return false;  // strengthen to remove bad successors
-            }
-            print_frames(frames, model.getVars());
-            cout << "Propagation: " << endl;
-            if (propagate()) {
-                print_frames(frames, model.getVars());
-                return true;     // propagate clauses; check for proof
-            }
-            print_frames(frames, model.getVars());
-            printStats();
-            ++k;                              // increment frontier
-//                cout << "Iteration: " << endl;
-//                print_frames(frames, model.getVars());
-        }
-    }
-
-    // Follows and prints chain of states from cexState forward.
-    void IC3::printWitness() {
-        if (cexState != 0) {
-            size_t curr = cexState;
-            while (curr) {
-                cout << stringOfLitVec(state(curr).inputs)
-                     << stringOfLitVec(state(curr).latches) << endl;
-                curr = state(curr).successor;
-            }
-        }
-    }
-
-    string IC3::stringOfLitVec(const LitVec &vec) {
-        stringstream ss;
-        for (LitVec::const_iterator i = vec.begin(); i != vec.end(); ++i)
-            ss << model.stringOfLit(*i) << " ";
-        return ss.str();
-    }
-
-    // WARNING: do not keep reference across newState() calls
-    State &IC3::state(size_t sti) { return states[sti - 1]; }
-
-    size_t IC3::newState() {
-        if (nextState >= states.size()) {
-            states.resize(states.size() + 1);
-            states.back().index = states.size();
-            states.back().used = false;
-        }
-        size_t ns = nextState;
-        assert (!states[ns].used);
-        states[ns].used = true;
-        while (nextState < states.size() && states[nextState].used)
-            nextState++;
-        return ns + 1;
-    }
-
-    void IC3::delState(size_t sti) {
-        State &st = state(sti);
-        st.used = false;
-        st.latches.clear();
-        st.inputs.clear();
-        if (nextState > st.index - 1) nextState = st.index - 1;
-    }
-
-    void IC3::resetStates() {
-        for (vector<State>::iterator i = states.begin(); i != states.end(); ++i) {
-            i->used = false;
-            i->latches.clear();
-            i->inputs.clear();
-        }
-        nextState = 0;
-    }
-
-    // Push a new Frame.
-    void IC3::extend() {
-        while (frames.size() < k + 2) {
-            frames.resize(frames.size() + 1);
-            Frame &fr = frames.back();
-            fr.k = frames.size() - 1;
-            fr.consecution = model.newSolver();
-            if (random) {
-                fr.consecution->random_seed = rand();
-                fr.consecution->rnd_init_act = true;
-            }
-            if (fr.k == 0) model.loadInitialCondition(*fr.consecution);
-            model.loadTransitionRelation(*fr.consecution);
-        }
-    }
-
-    void IC3::updateLitOrder(const LitVec &cube, size_t level) {
-        litOrder.decay();
-        numUpdates += 1;
-        numLits += cube.size();
-        litOrder.count(cube);
-    }
-
-    // order according to preference
-    void IC3::orderCube(LitVec &cube) {
-        stable_sort(cube.begin(), cube.end(), slimLitOrder);
-    }
-
-    // Orders assumptions for Minisat.
-    void IC3::orderAssumps(MSLitVec &cube, bool rev, int start) {
-        stable_sort(cube + start, cube + cube.size(), slimLitOrder);
-        if (rev) reverse(cube + start, cube + cube.size());
-    }
-
-    // Assumes that last call to fr.consecution->solve() was
-    // satisfiable.  Extracts state(s) cube from satisfying
-    // assignment.
-    size_t IC3::stateOf(Frame &fr, size_t succ) {
-        // create state
-        size_t st = newState();
-        state(st).successor = succ;
-        MSLitVec assumps;
-        assumps.capacity(1 + 2 * (model.endInputs() - model.beginInputs())
-                         + (model.endLatches() - model.beginLatches()));
-        Minisat::Lit act = Minisat::mkLit(lifts->newVar());  // activation literal
-        assumps.push(act);
-        Minisat::vec<Minisat::Lit> cls;
-        cls.push(~act);
-        cls.push(notInvConstraints);  // successor must satisfy inv. constraint
-        if (succ == 0)
-            cls.push(~model.primedError());
-        else
-            for (LitVec::const_iterator i = state(succ).latches.begin();
-                 i != state(succ).latches.end(); ++i)
+            // construct lifting solver
+            lifts = model.newSolver();
+            // don't assert primed invariant constraints
+            model.loadTransitionRelation(*lifts, false);
+            // assert notInvConstraints (in stateOf) when lifting
+            notInvConstraints = Minisat::mkLit(lifts->newVar());
+            Minisat::vec<Minisat::Lit> cls;
+            cls.push(~notInvConstraints);
+            for (LitVec::const_iterator i = model.invariantConstraints().begin();
+                 i != model.invariantConstraints().end(); ++i)
                 cls.push(model.primeLit(~*i));
-        lifts->addClause_(cls);
-        // extract and assert primary inputs
-        for (VarVec::const_iterator i = model.beginInputs();
-             i != model.endInputs(); ++i) {
-            Minisat::lbool val = fr.consecution->modelValue(i->var());
-            if (val != Minisat::l_Undef) {
-                Minisat::Lit pi = i->lit(val == Minisat::l_False);
-                state(st).inputs.push_back(pi);  // record full inputs
-                assumps.push(pi);
-            }
+            lifts->addClause_(cls);
         }
-        // some properties include inputs, so assert primed inputs after
-        for (VarVec::const_iterator i = model.beginInputs();
-             i != model.endInputs(); ++i) {
-            Minisat::lbool pval =
-                    fr.consecution->modelValue(model.primeVar(*i).var());
-            if (pval != Minisat::l_Undef)
-                assumps.push(model.primeLit(i->lit(pval == Minisat::l_False)));
-        }
-        int sz = assumps.size();
-        // extract and assert latches
-        LitVec latches;
-        for (VarVec::const_iterator i = model.beginLatches();
-             i != model.endLatches(); ++i) {
-            Minisat::lbool val = fr.consecution->modelValue(i->var());
-            if (val != Minisat::l_Undef) {
-                Minisat::Lit la = i->lit(val == Minisat::l_False);
-                latches.push_back(la);
-                assumps.push(la);
-            }
-        }
-        orderAssumps(assumps, false, sz);  // empirically found to be best choice
-        // State s, inputs i, transition relation T, successor t:
-        //   s & i & T & ~t' is unsat
-        // Core assumptions reveal a lifting of s.
-        ++nQuery;
-        startTimer();  // stats
-        bool rv = lifts->solve(assumps);
-        endTimer(satTime);
-        assert (!rv);
-        // obtain lifted latch set from unsat core
-        for (LitVec::const_iterator i = latches.begin(); i != latches.end(); ++i)
-            if (lifts->conflict.has(~*i))
-                state(st).latches.push_back(*i);  // record lifted latches
-        // deactivate negation of successor
-        lifts->releaseVar(~act);
-        return st;
-    }
 
-    // Checks if cube contains any initial states.
-    bool IC3::initiation(const LitVec &latches) {
-        return !model.isInitial(latches);
-    }
+        ~IC3() {
+            for (vector<Frame>::const_iterator i = frames.begin();
+                 i != frames.end(); ++i)
+                if (i->consecution) delete i->consecution;
+            delete lifts;
+        }
 
-    // Check if ~latches is inductive relative to frame fi.  If it's
-    // inductive and core is provided, extracts the unsat core.  If
-    // it's not inductive and pred is provided, extracts
-    // predecessor(s).
-    bool IC3::consecution(size_t fi, const LitVec &latches, size_t succ,
-                          LitVec *core, size_t *pred, bool orderedCore) {
-        Frame &fr = frames[fi];
-        MSLitVec assumps, cls;
-        assumps.capacity(1 + latches.size());
-        cls.capacity(1 + latches.size());
-        Minisat::Lit act = Minisat::mkLit(fr.consecution->newVar());
-        assumps.push(act);
-        cls.push(~act);
-        for (LitVec::const_iterator i = latches.begin();
-             i != latches.end(); ++i) {
-            cls.push(~*i);
-            assumps.push(*i);  // push unprimed...
-        }
-        // ... order... (empirically found to best choice)
-        if (pred) orderAssumps(assumps, false, 1);
-        else orderAssumps(assumps, orderedCore, 1);
-        // ... now prime
-        for (int i = 1; i < assumps.size(); ++i)
-            assumps[i] = model.primeLit(assumps[i]);
-        fr.consecution->addClause_(cls);
-        // F_fi & ~latches & T & latches'
-        ++nQuery;
-        startTimer();  // stats
-        bool rv = fr.consecution->solve(assumps);
-        endTimer(satTime);
-        if (rv) {
-            // fails: extract predecessor(s)
-            if (pred) *pred = stateOf(fr, succ);
-            fr.consecution->releaseVar(~act);
-            return false;
-        }
-        // succeeds
-        if (core) {
-            if (pred && orderedCore) {
-                // redo with correctly ordered assumps
-                reverse(assumps + 1, assumps + assumps.size());
-                ++nQuery;
-                startTimer();  // stats
-                rv = fr.consecution->solve(assumps);
-                assert (!rv);
-                endTimer(satTime);
-            }
-            for (LitVec::const_iterator i = latches.begin();
-                 i != latches.end(); ++i)
-                if (fr.consecution->conflict.has(~model.primeLit(*i)))
-                    core->push_back(*i);
-            if (!initiation(*core))
-                *core = latches;
-        }
-        fr.consecution->releaseVar(~act);
-        return true;
-    }
-
-    // Based on
-    //
-    //   Zyad Hassan, Aaron R. Bradley, and Fabio Somenzi, "Better
-    //   Generalization in IC3," (submitted May 2013)
-    //
-    // Improves upon "down" from the original paper (and the FMCAD'07
-    // paper) by handling CTGs.
-    bool IC3::ctgDown(size_t level, LitVec &cube, size_t keepTo, size_t recDepth) {
-        size_t ctgs = 0, joins = 0;
-        while (true) {
-            // induction check
-            if (!initiation(cube))
-                return false;
-            if (recDepth > maxDepth) {
-                // quick check if recursion depth is exceeded
-                LitVec core;
-                bool rv = consecution(level, cube, 0, &core, NULL, true);
-                if (rv && core.size() < cube.size()) {
-                    ++nCoreReduced;  // stats
-                    cube = core;
+        // The main loop.
+        bool check() {
+            startTime = time();  // stats
+            while (true) {
+                if (verbose > 1) cout << "Level " << k << endl;
+                extend();                         // push frontier frame
+                if (!strengthen()){
+                    print_frames(frames);
+                    return false;  // strengthen to remove bad successors
                 }
-                return rv;
-            }
-            // prepare to obtain CTG
-            size_t cubeState = newState();
-            state(cubeState).successor = 0;
-            state(cubeState).latches = cube;
-            size_t ctg;
-            LitVec core;
-            if (consecution(level, cube, cubeState, &core, &ctg, true)) {
-                if (core.size() < cube.size()) {
-                    ++nCoreReduced;  // stats
-                    cube = core;
+                if (propagate()){
+                    print_frames(frames);
+                    return true;     // propagate clauses; check for proof
                 }
-                // inductive, so clean up
-                delState(cubeState);
-                return true;
+                printStats();
+                ++k;                              // increment frontier
+                print_frames(frames);
             }
-            // not inductive, address interfering CTG
-            LitVec ctgCore;
-            bool ret = false;
-            if (ctgs < maxCTGs && level > 1 && initiation(state(ctg).latches)
-                && consecution(level - 1, state(ctg).latches, cubeState, &ctgCore)) {
-                // CTG is inductive relative to level-1; push forward and generalize
-                ++nCTG;  // stats
-                ++ctgs;
-                size_t j = level;
-                // QUERY: generalize then push or vice versa?
-                while (j <= k && consecution(j, ctgCore)) ++j;
-                mic(j - 1, ctgCore, recDepth + 1);
-                addCube(j, ctgCore);
-            } else if (joins < maxJoins) {
-                // ran out of CTG attempts, so join instead
-                ctgs = 0;
-                ++joins;
-                LitVec tmp;
-                for (size_t i = 0; i < cube.size(); ++i)
-                    if (binary_search(state(ctg).latches.begin(),
-                                      state(ctg).latches.end(), cube[i]))
-                        tmp.push_back(cube[i]);
-                    else if (i < keepTo) {
-                        // previously failed when this literal was dropped
-                        ++nAbortJoin;  // stats
-                        ret = true;
-                        break;
-                    }
-                cube = tmp;  // enlarged cube
-            } else
-                ret = true;
-            // clean up
-            delState(cubeState);
-            delState(ctg);
-            if (ret) return false;
         }
-    }
 
-    // Extracts minimal inductive (relative to level) subclause from
-    // ~cube --- at least that's where the name comes from.  With
-    // ctgDown, it's not quite a MIC anymore, but what's returned is
-    // inductive relative to the possibly modifed level.
-    void IC3::mic(size_t level, LitVec &cube, size_t recDepth) {
-        ++nmic;  // stats
-        // try dropping each literal in turn
-        size_t attempts = micAttempts;
-        orderCube(cube);
-        for (size_t i = 0; i < cube.size();) {
-            LitVec cp(cube.begin(), cube.begin() + i);
-            cp.insert(cp.end(), cube.begin() + i + 1, cube.end());
-            if (ctgDown(level, cp, i, recDepth)) {
-                // maintain original order
-                LitSet lits(cp.begin(), cp.end());
-                LitVec tmp;
-                for (LitVec::const_iterator j = cube.begin(); j != cube.end(); ++j)
-                    if (lits.find(*j) != lits.end())
-                        tmp.push_back(*j);
-                cube.swap(tmp);
-                // reset attempts
-                attempts = micAttempts;
-            } else {
-                if (!--attempts) {
-                    // Limit number of attempts: if micAttempts literals in a
-                    // row cannot be dropped, conclude that the cube is just
-                    // about minimal.  Definitely improves mics/second to use
-                    // a low micAttempts, but does it improve overall
-                    // performance?
-                    ++nAbortMic;  // stats
-                    return;
+        // Follows and prints chain of states from cexState forward.
+        void printWitness() {
+            if (cexState != 0) {
+                size_t curr = cexState;
+                while (curr) {
+                    cout << stringOfLitVec(state(curr).inputs)
+                         << stringOfLitVec(state(curr).latches) << endl;
+                    curr = state(curr).successor;
                 }
-                ++i;
             }
         }
-    }
 
-    // wrapper to start inductive generalization
-    void IC3::mic(size_t level, LitVec &cube) {
-        mic(level, cube, 1);
-    }
+    private:
 
-    // Adds cube to frames at and below level, unless !toAll, in which
-    // case only to level.
-    void IC3::addCube(size_t level, LitVec &cube, bool toAll, bool silent) {
-        sort(cube.begin(), cube.end());
-        pair<CubeSet::iterator, bool> rv = frames[level].borderCubes.insert(cube);
-        if (!rv.second) return;
-        if (!silent && verbose > 1)
-            cout << level << ": " << stringOfLitVec(cube) << endl;
-        earliest = min(earliest, level);
-        MSLitVec cls;
-        cls.capacity(cube.size());
-        for (LitVec::const_iterator i = cube.begin(); i != cube.end(); ++i)
-            cls.push(~*i);
-        for (size_t i = toAll ? 1 : level; i <= level; ++i)
-            frames[i].consecution->addClause(cls);
-        if (toAll && !silent) updateLitOrder(cube, level);
-    }
+        int verbose; // 0: silent, 1: stats, 2: all
+        bool random;
 
-    // ~cube was found to be inductive relative to level; now see if
-    // we can do better.
-    size_t IC3::generalize(size_t level, LitVec cube) {
-        // generalize
-        mic(level, cube);
-        // push
-        do { ++level; } while (level <= k && consecution(level, cube));
-        addCube(level, cube);
-        cout << "\t\tgeneralized" << endl;
-        cout << "\t\t";
-        print_cube(cube, model.getVars());
-        cout << "\t\tstate generalized <<< \n" << endl;
-        print_frames(frames, model.getVars());
-        return level;
-    }
+        string stringOfLitVec(const LitVec &vec) {
+            stringstream ss;
+            for (LitVec::const_iterator i = vec.begin(); i != vec.end(); ++i)
+                ss << model.stringOfLit(*i) << " ";
+            return ss.str();
+        }
 
-    // Process obligations according to priority.
-    bool IC3::handleObligations(PriorityQueue obls) {
-        cout << "\t\tHandling Obligations: Begin >>>>>" << endl;
-        while (!obls.empty()) {
-            PriorityQueue::iterator obli = obls.begin();
-            Obligation obl = *obli;
-            cout << "\t\tLevel: " << obl.level << " Depth: " << obl.depth << endl;
-            cout << "\t\tCTI" << endl;
-            cout << "\t\t";
-            print_cube(state(obl.state).latches, model.getVars());
-            LitVec core;
-            size_t predi;
-            // Is the obligation fulfilled?
-            if (consecution(obl.level, state(obl.state).latches, obl.state,
-                            &core, &predi)) {
-                // Yes, so generalize and possibly produce a new obligation
-                // at a higher level.
-                obls.erase(obli);
-                cout << "\t\tcore" << endl;
-                cout << "\t\t";
-                print_cube(core, model.getVars());
-                size_t n = generalize(obl.level, core);
-                if (n <= k)
-                    obls.insert(Obligation(obl.state, n, obl.depth));
-            } else if (obl.level == 0) {
-                // No, in fact an initial state is a predecessor.
-                cexState = predi;
-                return false;
-            } else {
-                cout << "\t\tCTI fulfilled" << endl;
-                cout << endl;
-                ++nCTI;  // stats
-                // No, so focus on predecessor.
-                obls.insert(Obligation(predi, obl.level - 1, obl.depth + 1));
+        Model &model;
+        size_t k;
+
+        vector<State> states;
+        size_t nextState;
+
+        // WARNING: do not keep reference across newState() calls
+        State &state(size_t sti) { return states[sti - 1]; }
+
+        size_t newState() {
+            if (nextState >= states.size()) {
+                states.resize(states.size() + 1);
+                states.back().index = states.size();
+                states.back().used = false;
+            }
+            size_t ns = nextState;
+            assert (!states[ns].used);
+            states[ns].used = true;
+            while (nextState < states.size() && states[nextState].used)
+                nextState++;
+            return ns + 1;
+        }
+
+        void delState(size_t sti) {
+            State &st = state(sti);
+            st.used = false;
+            st.latches.clear();
+            st.inputs.clear();
+            if (nextState > st.index - 1) nextState = st.index - 1;
+        }
+
+        void resetStates() {
+            for (vector<State>::iterator i = states.begin(); i != states.end(); ++i) {
+                i->used = false;
+                i->latches.clear();
+                i->inputs.clear();
+            }
+            nextState = 0;
+        }
+
+        vector<Frame> frames;
+
+        Minisat::Solver *lifts;
+        Minisat::Lit notInvConstraints;
+
+        // Push a new Frame.
+        void extend() {
+            while (frames.size() < k + 2) {
+                frames.resize(frames.size() + 1);
+                Frame &fr = frames.back();
+                fr.k = frames.size() - 1;
+                fr.consecution = model.newSolver();
+                if (random) {
+                    fr.consecution->random_seed = rand();
+                    fr.consecution->rnd_init_act = true;
+                }
+                if (fr.k == 0) model.loadInitialCondition(*fr.consecution);
+                model.loadTransitionRelation(*fr.consecution);
             }
         }
-        return true;
-    }
 
-    // Strengthens frontier to remove error successors.
-    bool IC3::strengthen() {
-        Frame &frontier = frames[k];
-        trivial = true;  // whether any cubes are generated
-        earliest = k + 1;  // earliest frame with enlarged borderCubes
-        while (true) {
+        // Structure and methods for imposing priorities on literals
+        // through ordering the dropping of literals in mic (drop leftmost
+        // literal first) and assumptions to Minisat.  The implemented
+        // ordering prefers to keep literals that appear frequently in
+        // addCube() calls.
+        struct HeuristicLitOrder {
+            HeuristicLitOrder() : _mini(1 << 20) {}
+
+            vector<float> counts;
+            size_t _mini;
+
+            void count(const LitVec &cube) {
+                assert (!cube.empty());
+                // assumes cube is ordered
+                size_t sz = (size_t) Minisat::toInt(Minisat::var(cube.back()));
+                if (sz >= counts.size()) counts.resize(sz + 1);
+                _mini = (size_t) Minisat::toInt(Minisat::var(cube[0]));
+                for (LitVec::const_iterator i = cube.begin(); i != cube.end(); ++i)
+                    counts[(size_t) Minisat::toInt(Minisat::var(*i))] += 1;
+            }
+
+            void decay() {
+                for (size_t i = _mini; i < counts.size(); ++i)
+                    counts[i] *= 0.99;
+            }
+        } litOrder;
+
+        struct SlimLitOrder {
+            HeuristicLitOrder *heuristicLitOrder;
+
+            SlimLitOrder() {}
+
+            bool operator()(const Minisat::Lit &l1, const Minisat::Lit &l2) const {
+                // l1, l2 must be unprimed
+                size_t i2 = (size_t) Minisat::toInt(Minisat::var(l2));
+                if (i2 >= heuristicLitOrder->counts.size()) return false;
+                size_t i1 = (size_t) Minisat::toInt(Minisat::var(l1));
+                if (i1 >= heuristicLitOrder->counts.size()) return true;
+                return (heuristicLitOrder->counts[i1] < heuristicLitOrder->counts[i2]);
+            }
+        } slimLitOrder;
+
+        float numLits, numUpdates;
+
+        void updateLitOrder(const LitVec &cube, size_t level) {
+            litOrder.decay();
+            numUpdates += 1;
+            numLits += cube.size();
+            litOrder.count(cube);
+        }
+
+        // order according to preference
+        void orderCube(LitVec &cube) {
+            stable_sort(cube.begin(), cube.end(), slimLitOrder);
+        }
+
+        typedef Minisat::vec<Minisat::Lit> MSLitVec;
+
+        // Orders assumptions for Minisat.
+        void orderAssumps(MSLitVec &cube, bool rev, int start = 0) {
+            stable_sort(cube + start, cube + cube.size(), slimLitOrder);
+            if (rev) reverse(cube + start, cube + cube.size());
+        }
+
+        // Assumes that last call to fr.consecution->solve() was
+        // satisfiable.  Extracts state(s) cube from satisfying
+        // assignment.
+        size_t stateOf(Frame &fr, size_t succ = 0) {
+            // create state
+            size_t st = newState();
+            state(st).successor = succ;
+            MSLitVec assumps;
+            assumps.capacity(1 + 2 * (model.endInputs() - model.beginInputs())
+                             + (model.endLatches() - model.beginLatches()));
+            Minisat::Lit act = Minisat::mkLit(lifts->newVar());  // activation literal
+            assumps.push(act);
+            Minisat::vec<Minisat::Lit> cls;
+            cls.push(~act);
+            cls.push(notInvConstraints);  // successor must satisfy inv. constraint
+            if (succ == 0)
+                cls.push(~model.primedError());
+            else
+                for (LitVec::const_iterator i = state(succ).latches.begin();
+                     i != state(succ).latches.end(); ++i)
+                    cls.push(model.primeLit(~*i));
+            lifts->addClause_(cls);
+            // extract and assert primary inputs
+            for (VarVec::const_iterator i = model.beginInputs();
+                 i != model.endInputs(); ++i) {
+                Minisat::lbool val = fr.consecution->modelValue(i->var());
+                if (val != Minisat::l_Undef) {
+                    Minisat::Lit pi = i->lit(val == Minisat::l_False);
+                    state(st).inputs.push_back(pi);  // record full inputs
+                    assumps.push(pi);
+                }
+            }
+            // some properties include inputs, so assert primed inputs after
+            for (VarVec::const_iterator i = model.beginInputs();
+                 i != model.endInputs(); ++i) {
+                Minisat::lbool pval =
+                        fr.consecution->modelValue(model.primeVar(*i).var());
+                if (pval != Minisat::l_Undef)
+                    assumps.push(model.primeLit(i->lit(pval == Minisat::l_False)));
+            }
+            int sz = assumps.size();
+            // extract and assert latches
+            LitVec latches;
+            for (VarVec::const_iterator i = model.beginLatches();
+                 i != model.endLatches(); ++i) {
+                Minisat::lbool val = fr.consecution->modelValue(i->var());
+                if (val != Minisat::l_Undef) {
+                    Minisat::Lit la = i->lit(val == Minisat::l_False);
+                    latches.push_back(la);
+                    assumps.push(la);
+                }
+            }
+            orderAssumps(assumps, false, sz);  // empirically found to be best choice
+            // State s, inputs i, transition relation T, successor t:
+            //   s & i & T & ~t' is unsat
+            // Core assumptions reveal a lifting of s.
             ++nQuery;
             startTimer();  // stats
-            bool rv = frontier.consecution->solve(model.primedError());
+            bool rv = lifts->solve(assumps);
             endTimer(satTime);
-            if (!rv) return true;
-            // handle CTI with error successor
-            ++nCTI;  // stats
-            trivial = false;
-            PriorityQueue pq;
-            // enqueue main obligation and handle
-            pq.insert(Obligation(stateOf(frontier), k - 1, 1));
-            if (!handleObligations(pq))
-                return false;
-            // finished with States for this iteration, so clean up
-            resetStates();
+            assert (!rv);
+            // obtain lifted latch set from unsat core
+            for (LitVec::const_iterator i = latches.begin(); i != latches.end(); ++i)
+                if (lifts->conflict.has(~*i))
+                    state(st).latches.push_back(*i);  // record lifted latches
+            // deactivate negation of successor
+            lifts->releaseVar(~act);
+            return st;
         }
-    }
 
-    // Propagates clauses forward using induction.  If any frame has
-    // all of its clauses propagated forward, then two frames' clause
-    // sets agree; hence those clause sets are inductive
-    // strengthenings of the property.  See the four invariants of IC3
-    // in the original paper.
-    bool IC3::propagate() {
-        if (verbose > 1) cout << "propagate" << endl;
-        // 1. clean up: remove c in frame i if c appears in frame j when i < j
-        CubeSet all;
-        for (size_t i = k + 1; i >= earliest; --i) {
-            Frame &fr = frames[i];
-            CubeSet rem, nall;
-            set_difference(fr.borderCubes.begin(), fr.borderCubes.end(),
-                           all.begin(), all.end(),
-                           inserter(rem, rem.end()), LitVecComp());
-            if (verbose > 1)
-                cout << i << " " << fr.borderCubes.size() << " " << rem.size() << " ";
-            fr.borderCubes.swap(rem);
-            set_union(rem.begin(), rem.end(),
-                      all.begin(), all.end(),
-                      inserter(nall, nall.end()), LitVecComp());
-            all.swap(nall);
-            for (CubeSet::const_iterator i = fr.borderCubes.begin();
-                 i != fr.borderCubes.end(); ++i)
-                assert (all.find(*i) != all.end());
-            if (verbose > 1)
-                cout << all.size() << endl;
+        // Checks if cube contains any initial states.
+        bool initiation(const LitVec &latches) {
+            return !model.isInitial(latches);
         }
-        // 2. check if each c in frame i can be pushed to frame j
-        for (size_t i = trivial ? k : 1; i <= k; ++i) {
-            int ckeep = 0, cprop = 0, cdrop = 0;
-            Frame &fr = frames[i];
-            for (CubeSet::iterator j = fr.borderCubes.begin();
-                 j != fr.borderCubes.end();) {
+
+        // Check if ~latches is inductive relative to frame fi.  If it's
+        // inductive and core is provided, extracts the unsat core.  If
+        // it's not inductive and pred is provided, extracts
+        // predecessor(s).
+        bool consecution(size_t fi, const LitVec &latches, size_t succ = 0,
+                         LitVec *core = NULL, size_t *pred = NULL,
+                         bool orderedCore = false) {
+            Frame &fr = frames[fi];
+            MSLitVec assumps, cls;
+            assumps.capacity(1 + latches.size());
+            cls.capacity(1 + latches.size());
+            Minisat::Lit act = Minisat::mkLit(fr.consecution->newVar());
+            assumps.push(act);
+            cls.push(~act);
+            for (LitVec::const_iterator i = latches.begin();
+                 i != latches.end(); ++i) {
+                cls.push(~*i);
+                assumps.push(*i);  // push unprimed...
+            }
+            // ... order... (empirically found to best choice)
+            if (pred) orderAssumps(assumps, false, 1);
+            else orderAssumps(assumps, orderedCore, 1);
+            // ... now prime
+            for (int i = 1; i < assumps.size(); ++i)
+                assumps[i] = model.primeLit(assumps[i]);
+            fr.consecution->addClause_(cls);
+            // F_fi & ~latches & T & latches'
+            ++nQuery;
+            startTimer();  // stats
+            bool rv = fr.consecution->solve(assumps);
+            endTimer(satTime);
+            if (rv) {
+                // fails: extract predecessor(s)
+                if (pred) *pred = stateOf(fr, succ);
+                fr.consecution->releaseVar(~act);
+                return false;
+            }
+            // succeeds
+            if (core) {
+                if (pred && orderedCore) {
+                    // redo with correctly ordered assumps
+                    reverse(assumps + 1, assumps + assumps.size());
+                    ++nQuery;
+                    startTimer();  // stats
+                    rv = fr.consecution->solve(assumps);
+                    assert (!rv);
+                    endTimer(satTime);
+                }
+                for (LitVec::const_iterator i = latches.begin();
+                     i != latches.end(); ++i)
+                    if (fr.consecution->conflict.has(~model.primeLit(*i)))
+                        core->push_back(*i);
+                if (!initiation(*core))
+                    *core = latches;
+            }
+            fr.consecution->releaseVar(~act);
+            return true;
+        }
+
+        size_t maxDepth, maxCTGs, maxJoins, micAttempts;
+
+        // Based on
+        //
+        //   Zyad Hassan, Aaron R. Bradley, and Fabio Somenzi, "Better
+        //   Generalization in IC3," (submitted May 2013)
+        //
+        // Improves upon "down" from the original paper (and the FMCAD'07
+        // paper) by handling CTGs.
+        bool ctgDown(size_t level, LitVec &cube, size_t keepTo, size_t recDepth) {
+            size_t ctgs = 0, joins = 0;
+            while (true) {
+                // induction check
+                if (!initiation(cube))
+                    return false;
+                if (recDepth > maxDepth) {
+                    // quick check if recursion depth is exceeded
+                    LitVec core;
+                    bool rv = consecution(level, cube, 0, &core, NULL, true);
+                    if (rv && core.size() < cube.size()) {
+                        ++nCoreReduced;  // stats
+                        cube = core;
+                    }
+                    return rv;
+                }
+                // prepare to obtain CTG
+                size_t cubeState = newState();
+                state(cubeState).successor = 0;
+                state(cubeState).latches = cube;
+                size_t ctg;
                 LitVec core;
-                if (consecution(i, *j, 0, &core)) {
-                    ++cprop;
-                    // only add to frame i+1 unless the core is reduced
-                    addCube(i + 1, core, core.size() < j->size(), true);
-                    CubeSet::iterator tmp = j;
-                    ++j;
-                    fr.borderCubes.erase(tmp);
+                if (consecution(level, cube, cubeState, &core, &ctg, true)) {
+                    if (core.size() < cube.size()) {
+                        ++nCoreReduced;  // stats
+                        cube = core;
+                    }
+                    // inductive, so clean up
+                    delState(cubeState);
+                    return true;
+                }
+                // not inductive, address interfering CTG
+                LitVec ctgCore;
+                bool ret = false;
+                if (ctgs < maxCTGs && level > 1 && initiation(state(ctg).latches)
+                    && consecution(level - 1, state(ctg).latches, cubeState, &ctgCore)) {
+                    // CTG is inductive relative to level-1; push forward and generalize
+                    ++nCTG;  // stats
+                    ++ctgs;
+                    size_t j = level;
+                    // QUERY: generalize then push or vice versa?
+                    while (j <= k && consecution(j, ctgCore)) ++j;
+                    mic(j - 1, ctgCore, recDepth + 1);
+                    addCube(j, ctgCore);
+                } else if (joins < maxJoins) {
+                    // ran out of CTG attempts, so join instead
+                    ctgs = 0;
+                    ++joins;
+                    LitVec tmp;
+                    for (size_t i = 0; i < cube.size(); ++i)
+                        if (binary_search(state(ctg).latches.begin(),
+                                          state(ctg).latches.end(), cube[i]))
+                            tmp.push_back(cube[i]);
+                        else if (i < keepTo) {
+                            // previously failed when this literal was dropped
+                            ++nAbortJoin;  // stats
+                            ret = true;
+                            break;
+                        }
+                    cube = tmp;  // enlarged cube
+                } else
+                    ret = true;
+                // clean up
+                delState(cubeState);
+                delState(ctg);
+                if (ret) return false;
+            }
+        }
+
+        // Extracts minimal inductive (relative to level) subclause from
+        // ~cube --- at least that's where the name comes from.  With
+        // ctgDown, it's not quite a MIC anymore, but what's returned is
+        // inductive relative to the possibly modifed level.
+        void mic(size_t level, LitVec &cube, size_t recDepth) {
+            ++nmic;  // stats
+            // try dropping each literal in turn
+            size_t attempts = micAttempts;
+            orderCube(cube);
+            for (size_t i = 0; i < cube.size();) {
+                LitVec cp(cube.begin(), cube.begin() + i);
+                cp.insert(cp.end(), cube.begin() + i + 1, cube.end());
+                if (ctgDown(level, cp, i, recDepth)) {
+                    // maintain original order
+                    LitSet lits(cp.begin(), cp.end());
+                    LitVec tmp;
+                    for (LitVec::const_iterator j = cube.begin(); j != cube.end(); ++j)
+                        if (lits.find(*j) != lits.end())
+                            tmp.push_back(*j);
+                    cube.swap(tmp);
+                    // reset attempts
+                    attempts = micAttempts;
                 } else {
-                    ++ckeep;
-                    ++j;
+                    if (!--attempts) {
+                        // Limit number of attempts: if micAttempts literals in a
+                        // row cannot be dropped, conclude that the cube is just
+                        // about minimal.  Definitely improves mics/second to use
+                        // a low micAttempts, but does it improve overall
+                        // performance?
+                        ++nAbortMic;  // stats
+                        return;
+                    }
+                    ++i;
                 }
             }
-            if (verbose > 1)
-                cout << i << " " << ckeep << " " << cprop << " " << cdrop << endl;
-            if (fr.borderCubes.empty())
-                return true;
         }
-        // 3. simplify frames
-        for (size_t i = trivial ? k : 1; i <= k + 1; ++i)
-            frames[i].consecution->simplify();
-        lifts->simplify();
-        return false;
-    }
 
-    clock_t IC3::time() {
-        struct tms t;
-        times(&t);
-        return t.tms_utime;
-    }
+        // wrapper to start inductive generalization
+        void mic(size_t level, LitVec &cube) {
+            mic(level, cube, 1);
+        }
 
-    void IC3::startTimer() { timer = time(); }
+        size_t earliest;  // track earliest modified level in a major iteration
 
-    void IC3::endTimer(clock_t &t) { t += (time() - timer); }
+        // Adds cube to frames at and below level, unless !toAll, in which
+        // case only to level.
+        void addCube(size_t level, LitVec &cube, bool toAll = true,
+                     bool silent = false) {
+            sort(cube.begin(), cube.end());
+            pair<CubeSet::iterator, bool> rv = frames[level].borderCubes.insert(cube);
+            if (!rv.second) return;
+            if (!silent && verbose > 1)
+                cout << level << ": " << stringOfLitVec(cube) << endl;
+            earliest = min(earliest, level);
+            MSLitVec cls;
+            cls.capacity(cube.size());
+            for (LitVec::const_iterator i = cube.begin(); i != cube.end(); ++i)
+                cls.push(~*i);
+            for (size_t i = toAll ? 1 : level; i <= level; ++i)
+                frames[i].consecution->addClause(cls);
+            if (toAll && !silent) updateLitOrder(cube, level);
+        }
 
-    void IC3::printStats() {
-        if (!verbose) return;
-        clock_t etime = time();
-        cout << ". Elapsed time: " << ((double) etime / sysconf(_SC_CLK_TCK)) << endl;
-        etime -= startTime;
-        if (!etime) etime = 1;
-        cout << ". % SAT:        " << (int) (100 * (((double) satTime) / ((double) etime))) << endl;
-        cout << ". K:            " << k << endl;
-        cout << ". # Queries:    " << nQuery << endl;
-        cout << ". # CTIs:       " << nCTI << endl;
-        cout << ". # CTGs:       " << nCTG << endl;
-        cout << ". # mic calls:  " << nmic << endl;
-        cout << ". Queries/sec:  " << (int) (((double) nQuery) / ((double) etime) * sysconf(_SC_CLK_TCK)) << endl;
-        cout << ". Mics/sec:     " << (int) (((double) nmic) / ((double) etime) * sysconf(_SC_CLK_TCK)) << endl;
-        cout << ". # Red. cores: " << nCoreReduced << endl;
-        cout << ". # Int. joins: " << nAbortJoin << endl;
-        cout << ". # Int. mics:  " << nAbortMic << endl;
-        if (numUpdates) cout << ". Avg lits/cls: " << numLits / numUpdates << endl;
-    }
+        // ~cube was found to be inductive relative to level; now see if
+        // we can do better.
+        size_t generalize(size_t level, LitVec cube) {
+            // generalize
+            mic(level, cube);
+            // push
+            do { ++level; } while (level <= k && consecution(level, cube));
+            addCube(level, cube);
+            return level;
+        }
+
+        size_t cexState;  // beginning of counterexample trace
+
+        // Process obligations according to priority.
+        bool handleObligations(PriorityQueue obls) {
+            cout << "Handling Obligations: Begin >>>>>" << endl;
+            while (!obls.empty()) {
+                PriorityQueue::iterator obli = obls.begin();
+                Obligation obl = *obli;
+                print_cube(state(obl.state).latches);
+                LitVec core;
+                size_t predi;
+                // Is the obligation fulfilled?
+                if (consecution(obl.level, state(obl.state).latches, obl.state,
+                                &core, &predi)) {
+                    // Yes, so generalize and possibly produce a new obligation
+                    // at a higher level.
+                    obls.erase(obli);
+                    cout << "core"<< endl;
+                    print_cube(core);
+                    size_t n = generalize(obl.level, core);
+                    cout << "generalized" << endl;
+                    print_cube(core);
+                    cout << "state generalized <<< \n" << endl;
+                    if (n <= k)
+                        obls.insert(Obligation(obl.state, n, obl.depth));
+                } else if (obl.level == 0) {
+                    // No, in fact an initial state is a predecessor.
+                    cexState = predi;
+                    return false;
+                } else {
+                    ++nCTI;  // stats
+                    // No, so focus on predecessor.
+                    obls.insert(Obligation(predi, obl.level - 1, obl.depth + 1));
+                }
+            }
+            return true;
+        }
+
+        bool trivial;  // indicates whether strengthening was required
+        // during major iteration
+
+        // Strengthens frontier to remove error successors.
+        bool strengthen() {
+            Frame &frontier = frames[k];
+            trivial = true;  // whether any cubes are generated
+            earliest = k + 1;  // earliest frame with enlarged borderCubes
+            while (true) {
+                ++nQuery;
+                startTimer();  // stats
+                bool rv = frontier.consecution->solve(model.primedError());
+                endTimer(satTime);
+                if (!rv) return true;
+                // handle CTI with error successor
+                ++nCTI;  // stats
+                trivial = false;
+                PriorityQueue pq;
+                // enqueue main obligation and handle
+                pq.insert(Obligation(stateOf(frontier), k - 1, 1));
+                if (!handleObligations(pq))
+                    return false;
+                // finished with States for this iteration, so clean up
+                resetStates();
+            }
+        }
+
+        // Propagates clauses forward using induction.  If any frame has
+        // all of its clauses propagated forward, then two frames' clause
+        // sets agree; hence those clause sets are inductive
+        // strengthenings of the property.  See the four invariants of IC3
+        // in the original paper.
+        bool propagate() {
+            if (verbose > 1) cout << "propagate" << endl;
+            // 1. clean up: remove c in frame i if c appears in frame j when i < j
+            CubeSet all;
+            for (size_t i = k + 1; i >= earliest; --i) {
+                Frame &fr = frames[i];
+                CubeSet rem, nall;
+                set_difference(fr.borderCubes.begin(), fr.borderCubes.end(),
+                               all.begin(), all.end(),
+                               inserter(rem, rem.end()), LitVecComp());
+                if (verbose > 1)
+                    cout << i << " " << fr.borderCubes.size() << " " << rem.size() << " ";
+                fr.borderCubes.swap(rem);
+                set_union(rem.begin(), rem.end(),
+                          all.begin(), all.end(),
+                          inserter(nall, nall.end()), LitVecComp());
+                all.swap(nall);
+                for (CubeSet::const_iterator i = fr.borderCubes.begin();
+                     i != fr.borderCubes.end(); ++i)
+                    assert (all.find(*i) != all.end());
+                if (verbose > 1)
+                    cout << all.size() << endl;
+            }
+            // 2. check if each c in frame i can be pushed to frame j
+            for (size_t i = trivial ? k : 1; i <= k; ++i) {
+                int ckeep = 0, cprop = 0, cdrop = 0;
+                Frame &fr = frames[i];
+                for (CubeSet::iterator j = fr.borderCubes.begin();
+                     j != fr.borderCubes.end();) {
+                    LitVec core;
+                    if (consecution(i, *j, 0, &core)) {
+                        ++cprop;
+                        // only add to frame i+1 unless the core is reduced
+                        addCube(i + 1, core, core.size() < j->size(), true);
+                        CubeSet::iterator tmp = j;
+                        ++j;
+                        fr.borderCubes.erase(tmp);
+                    } else {
+                        ++ckeep;
+                        ++j;
+                    }
+                }
+                if (verbose > 1)
+                    cout << i << " " << ckeep << " " << cprop << " " << cdrop << endl;
+                if (fr.borderCubes.empty())
+                    return true;
+            }
+            // 3. simplify frames
+            for (size_t i = trivial ? k : 1; i <= k + 1; ++i)
+                frames[i].consecution->simplify();
+            lifts->simplify();
+            return false;
+        }
+
+        int nQuery, nCTI, nCTG, nmic;
+        clock_t startTime, satTime;
+        int nCoreReduced, nAbortJoin, nAbortMic;
+
+        clock_t time() {
+            struct tms t;
+            times(&t);
+            return t.tms_utime;
+        }
+
+        clock_t timer;
+
+        void startTimer() { timer = time(); }
+
+        void endTimer(clock_t &t) { t += (time() - timer); }
+
+        void printStats() {
+            if (!verbose) return;
+            clock_t etime = time();
+            cout << ". Elapsed time: " << ((double) etime / sysconf(_SC_CLK_TCK)) << endl;
+            etime -= startTime;
+            if (!etime) etime = 1;
+            cout << ". % SAT:        " << (int) (100 * (((double) satTime) / ((double) etime))) << endl;
+            cout << ". K:            " << k << endl;
+            cout << ". # Queries:    " << nQuery << endl;
+            cout << ". # CTIs:       " << nCTI << endl;
+            cout << ". # CTGs:       " << nCTG << endl;
+            cout << ". # mic calls:  " << nmic << endl;
+            cout << ". Queries/sec:  " << (int) (((double) nQuery) / ((double) etime) * sysconf(_SC_CLK_TCK)) << endl;
+            cout << ". Mics/sec:     " << (int) (((double) nmic) / ((double) etime) * sysconf(_SC_CLK_TCK)) << endl;
+            cout << ". # Red. cores: " << nCoreReduced << endl;
+            cout << ". # Int. joins: " << nAbortJoin << endl;
+            cout << ". # Int. mics:  " << nAbortMic << endl;
+            if (numUpdates) cout << ". Avg lits/cls: " << numLits / numUpdates << endl;
+        }
+
+        friend bool check(Model &, int, bool, bool);
+
+    };
 
     // IC3 does not check for 0-step and 1-step reachability, so do it
     // separately.
