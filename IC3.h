@@ -237,6 +237,11 @@ namespace IC3 {
         void printStats();
 
         friend bool check(Model &, IC3&, int, bool, bool);
+
+        vector<LitVec> lifted_states;
+        PriorityQueue all_obligations;
+
+        void reuse_previous_obligations();
     };
 
     bool check(Model &model,
