@@ -150,6 +150,10 @@ namespace IC3 {
         lifts->addClause_(cls);
     }
 
+    IC3::IC3(Model &_model, IC3& ic3) : IC3(model) {
+
+    }
+
     IC3::~IC3() {
         for (vector<Frame>::const_iterator i = frames.begin();
              i != frames.end(); ++i)

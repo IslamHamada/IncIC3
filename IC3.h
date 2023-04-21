@@ -104,6 +104,7 @@ namespace IC3 {
     class IC3 {
     public:
         IC3(Model &_model);
+        IC3(Model &_model, IC3& old_ic3);
 
         ~IC3();
 
