@@ -284,6 +284,15 @@ namespace IC3 {
         }
         cout << "<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
     }
+
+    static void print_vec_lit(MSLitVec& s, VarVec vars) {
+        cout << "{";
+        for (int i = 0; i < s.size(); i++) {
+            print_lit(s[i], vars);
+        }
+        cout << "}";
+        cout << endl;
+    }
 }
 
 #endif
