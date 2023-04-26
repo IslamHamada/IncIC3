@@ -682,6 +682,58 @@ namespace IC3 {
         return false;
     }
 
+    void IC3::propagate2() {
+        if (verbose > 1) cout << "propagate" << endl;
+        // 1. clean up: remove c in frame i if c appears in frame j when i < j
+        CubeSet all;
+        for (size_t i = k + 1; i >= earliest; --i) {
+            Frame &fr = frames[i];
+            CubeSet rem, nall;
+            set_difference(fr.borderCubes.begin(), fr.borderCubes.end(),
+                           all.begin(), all.end(),
+                           inserter(rem, rem.end()), LitVecComp());
+            if (verbose > 1)
+                cout << i << " " << fr.borderCubes.size() << " " << rem.size() << " ";
+            fr.borderCubes.swap(rem);
+            set_union(rem.begin(), rem.end(),
+                      all.begin(), all.end(),
+                      inserter(nall, nall.end()), LitVecComp());
+            all.swap(nall);
+            for (CubeSet::const_iterator i = fr.borderCubes.begin();
+                 i != fr.borderCubes.end(); ++i)
+                assert (all.find(*i) != all.end());
+            if (verbose > 1)
+                cout << all.size() << endl;
+        }
+        // 2. check if each c in frame i can be pushed to frame j
+        for (size_t i = trivial ? k : 1; i <= k; ++i) {
+            int ckeep = 0, cprop = 0, cdrop = 0;
+            Frame &fr = frames[i];
+            for (CubeSet::iterator j = fr.borderCubes.begin();
+                 j != fr.borderCubes.end();) {
+                LitVec core;
+                if (consecution(i, *j, 0, &core)) {
+                    ++cprop;
+                    // only add to frame i+1 unless the core is reduced
+                    addCube(i + 1, core, core.size() < j->size(), true);
+                    CubeSet::iterator tmp = j;
+                    ++j;
+                    fr.borderCubes.erase(tmp);
+                } else {
+                    ++ckeep;
+                    ++j;
+                }
+            }
+            if (verbose > 1)
+                cout << i << " " << ckeep << " " << cprop << " " << cdrop << endl;
+        }
+
+        // 3. simplify frames
+        for (size_t i = trivial ? k : 1; i <= k + 1; ++i)
+            frames[i].consecution->simplify();
+        lifts->simplify();
+    }
+
     clock_t IC3::time() {
         struct tms t;
         times(&t);
