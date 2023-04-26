@@ -76,6 +76,17 @@ namespace IC3 {
         size_t depth;  // Length of CTI suffix to error.
     };
 
+    class Obligation2 {
+    public:
+        size_t state;  // Generalize this state...
+        size_t level;  // ... relative to this level.
+        size_t depth;  // Length of CTI suffix to error.
+        LitVec core;
+
+        Obligation2(size_t st, size_t l, size_t d, LitVec c) :
+                state(st), level(l), depth(d), core(c){}
+    };
+
     typedef set<LitVec, LitVecComp> CubeSet;
 
     // For IC3's overall frame structure.
@@ -97,6 +108,20 @@ namespace IC3 {
         }
     };
 
+    class ObligationComp2 {
+    public:
+        bool operator()(const Obligation2 &o1, const Obligation2 &o2) {
+            if (o1.level < o2.level) return true;  // prefer lower levels (required)
+            if (o1.level > o2.level) return false;
+            if (o1.depth < o2.depth) return true;  // prefer shallower (heuristic)
+            if (o1.depth > o2.depth) return false;
+            if (o1.state < o2.state) return true;  // canonical final decider
+            return false;
+        }
+    };
+
+    typedef set<Obligation, ObligationComp> PriorityQueue;
+    typedef set<Obligation2, ObligationComp2> PriorityQueue2;
     typedef set<Obligation, ObligationComp> PriorityQueue;
 
 
