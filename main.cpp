@@ -62,9 +62,6 @@ int main(int argc, char **argv) {
 //    const char *msg = aiger_read_from_file(aig, stdin);
     const char *msg = aiger_open_and_read_from_file(aig, file_name.c_str());
 
-    // read AIGER model
-    aiger *aig = aiger_init();
-    const char *msg = aiger_read_from_file(aig, stdin);
     if (msg) {
         cout << msg << endl;
         return 0;
