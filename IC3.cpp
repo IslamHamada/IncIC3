@@ -161,6 +161,22 @@ namespace IC3 {
         }
     }
 
+    void IC3::inc2(IC3& ic3) {
+        int first_frame;
+        for(int i = 1; i < ic3.frames.size(); i++){
+            if(ic3.frames[i].borderCubes.empty()){
+                first_frame = i + 1;
+                break;
+            }
+        }
+        extend();
+        for(int i = first_frame; i < ic3.frames.size(); i++){
+            for(LitVec c: ic3.frames[i].borderCubes){
+                addCube(1, c);
+            }
+        }
+        print_frames(frames, model.getVars());
+    }
     }
 
     IC3::~IC3() {
