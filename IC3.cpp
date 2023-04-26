@@ -152,7 +152,8 @@ namespace IC3 {
 
     IC3::IC3(Model &_model, IC3& ic3, int technique) : IC3(_model) {
         states = ic3.states;
-        Var::gvi = states.size();
+        nextState = states.size() + 1;
+        Var::gvi = (states.size() > Var::gvi) ? states.size(): Var::gvi;
         baseCases(model);
         if(technique == 1){
             inc1(ic3);
