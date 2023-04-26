@@ -129,7 +129,7 @@ namespace IC3 {
     class IC3 {
     public:
         IC3(Model &_model);
-        IC3(Model &_model, IC3& old_ic3);
+        IC3(Model &_model, IC3& old_ic3, int technique);
 
         ~IC3();
 
@@ -264,10 +264,19 @@ namespace IC3 {
 
         friend bool check(Model &, IC3&, int, bool, bool);
 
-        vector<LitVec> lifted_states;
-        PriorityQueue all_obligations;
+//        vector<LitVec> lifted_states;
+        PriorityQueue2 lifted_obligations;
 
-        void reuse_previous_obligations();
+        ////////////////////// first technique
+        void inc1(IC3& ic3);
+        void propagate2();
+        bool consecution2(size_t fi, const LitVec &latches, size_t succ = 0,
+                         LitVec *core = NULL, size_t *pred = NULL,
+                         bool orderedCore = false);
+        bool reuse_previous_obligations(PriorityQueue2 lifted_obligations);
+
+        ////////////////////// second technique
+        void inc2(IC3& ic3);
     };
 
     bool check(Model &model,
