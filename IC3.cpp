@@ -150,7 +150,16 @@ namespace IC3 {
         lifts->addClause_(cls);
     }
 
-    IC3::IC3(Model &_model, IC3& ic3) : IC3(model) {
+    IC3::IC3(Model &_model, IC3& ic3, int technique) : IC3(_model) {
+        states = ic3.states;
+        Var::gvi = states.size();
+        baseCases(model);
+        if(technique == 1){
+            inc1(ic3);
+        } else if (technique ==2){
+            inc2(ic3);
+        }
+    }
 
     }
 
