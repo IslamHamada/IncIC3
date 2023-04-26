@@ -161,6 +161,21 @@ namespace IC3 {
         }
     }
 
+    void IC3::inc1(IC3& ic3) {
+
+        cout << states.size() << endl;
+        k = ic3.k;
+
+        earliest = k + 1;
+        trivial = false;
+        for(int i = 0; i < states.size(); i++){
+            states[i].used = false;
+        }
+        print_previous_obligations(ic3.lifted_obligations, model.getVars());
+        reuse_previous_obligations(ic3.lifted_obligations);
+        k = 1;
+    }
+
     void IC3::inc2(IC3& ic3) {
         int first_frame;
         for(int i = 1; i < ic3.frames.size(); i++){
@@ -177,6 +192,67 @@ namespace IC3 {
         }
         print_frames(frames, model.getVars());
     }
+
+    bool IC3::reuse_previous_obligations(PriorityQueue2 lifted_obligations) {
+        int prev_level = 0;
+        while (!lifted_obligations.empty()) {
+//            for(Obligation2 obl : lifted_obligations){
+//                cout << "\t\tLevel: " << obl.level << " Depth: " << obl.depth << endl;
+//                cout << "\t\tCTI" << endl;
+//                cout << "\t\t";
+//                print_cube(obl.core, model.getVars());
+//            }
+            print_previous_obligations(lifted_obligations, model.getVars());
+            PriorityQueue2::iterator obli = lifted_obligations.begin();
+            Obligation2 obl = *obli;
+            if(obl.level > prev_level){
+                prev_level = obl.level;
+                propagate2();
+//                print_frames(frames, model.getVars());
+            }
+//            cout << "\t\tLevel: " << obl.level << " Depth: " << obl.depth << endl;
+//            cout << "\t\tCTI" << endl;
+//            cout << "\t\t";
+//            print_cube(obl.core, model.getVars());
+            while(obl.level >= frames.size()){
+                extend();
+            }
+            LitVec core;
+            lifted_obligations.erase(obli);
+            // Is the obligation fulfilled?
+            if (consecution(obl.level, obl.core, obl.state, &core)) {
+//                cout << "Obligation Fulfilled" << endl;
+                // Yes, so generalize and possibly produce a new obligation
+                // at a higher level.
+//                cout << "\t\tcore" << endl;
+//                cout << "\t\t";
+//                print_cube(core, model.getVars());
+//                Obligation2 lifted_obl(obl.state, obl.level, obl.depth, core);
+//                lifted_obligations.insert(lifted_obl);
+                size_t n = generalize(obl.level, core);
+//                print_frames(frames, model.getVars());
+//                propagate();
+//                if (n <= k) {
+//                    Obligation obl2 = Obligation(obl.state, n, obl.depth);
+//                    lifted_obligations.insert(obl2);
+//                }
+            } else if (obl.level == 0) {
+                // No, in fact an initial state is a predecessor.
+//                cexState = predi;
+                return false;
+            } else {
+//                Obligation2 lifted_obl(obl.state, obl.level, obl.depth, state(obl.state).latches);
+//                lifted_obligations.insert(lifted_obl);
+//                cout << "\t\tCTI fulfilled" << endl;
+//                cout << endl;
+//                ++nCTI;  // stats
+//                // No, so focus on predecessor.
+//                Obligation2 obl2 = Obligation2(predi, obl.level - 1, obl.depth + 1, state(predi).latches);
+//                lifted_obligations.insert(obl2);
+            }
+        }
+        propagate2();
+        return true;
     }
 
     IC3::~IC3() {
