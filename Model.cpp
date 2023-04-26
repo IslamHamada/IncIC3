@@ -264,6 +264,7 @@ Minisat::Lit lit(const VarVec &vars, vector<int> varToOrderIndex, unsigned int l
 }
 
 Model *modelFromAiger(aiger *aig, unsigned int propertyIndex) {
+    Var::gvi = 0;
     vector<int> varToOrderIndex(aig->maxvar + 1);
     VarVec vars(1, Var("false"));
 
