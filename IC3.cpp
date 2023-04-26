@@ -682,6 +682,13 @@ namespace IC3 {
                 cout << "\t\tcore" << endl;
                 cout << "\t\t";
                 print_cube(core, model.getVars());
+                Obligation2 lifted_obl(obl.state, obl.level, obl.depth, core);
+                lifted_obligations.insert(lifted_obl);
+                size_t n = generalize(obl.level, core);
+                if (n <= k) {
+                    Obligation obl2 = Obligation(obl.state, n, obl.depth);
+                    obls.insert(obl2);
+                }
                 size_t n = generalize(obl.level, core);
                 if (n <= k)
                     obls.insert(Obligation(obl.state, n, obl.depth));
@@ -690,11 +697,14 @@ namespace IC3 {
                 cexState = predi;
                 return false;
             } else {
-                cout << "\t\tCTI fulfilled" << endl;
-                cout << endl;
+                Obligation2 lifted_obl(obl.state, obl.level, obl.depth, state(obl.state).latches);
+                lifted_obligations.insert(lifted_obl);
+//                cout << "\t\tCTI fulfilled" << endl;
+//                cout << endl;
                 ++nCTI;  // stats
                 // No, so focus on predecessor.
-                obls.insert(Obligation(predi, obl.level - 1, obl.depth + 1));
+                Obligation obl2 = Obligation(predi, obl.level - 1, obl.depth + 1);
+                obls.insert(obl2);
             }
         }
         return true;
