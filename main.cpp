@@ -66,20 +66,78 @@ int main(int argc, char **argv) {
         cout << msg << endl;
         return 0;
     }
+
     // create the Model from the obtained aig
     Model *model = modelFromAiger(aig, propertyIndex);
     aiger_reset(aig);
+
     if (!model) return 0;
 
+    bool rv;
     // model check it
+    clock_t begin_time = clock();
     IC3::IC3 ic3(*model);
-    bool rv = IC3::check(*model, ic3, verbose, basic, random);
-    cout << !rv << endl;
     rv = IC3::check(*model, ic3, verbose, basic, random);
-    // print 0/1 according to AIGER standard
+    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC << endl;
+    cout << "Constrained Instance" << endl;
+    cout << "done" << endl;
+    cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
     cout << !rv << endl;
 
+    aiger *aig2 = aiger_init();
+    const char *msg2 = aiger_open_and_read_from_file(aig2, file_name.c_str());
+    Model *model2 = modelFromAiger(aig2, propertyIndex);
+    model2->init.pop_back();
+    aiger_reset(aig2);
+
+    begin_time = clock();
+    IC3::IC3 ic3_2(*model2, ic3, 1);
+    rv = ic3_2.check();
+    cout << !rv << endl;
+    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC << endl;
+    cout << "Relaxed Inc1" << endl;
+    cout << "done" << endl;
+    cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
+    cout << !rv << endl;
+
+    aiger *aig3 = aiger_init();
+    const char *msg3 = aiger_open_and_read_from_file(aig3, file_name.c_str());
+    Model *model3 = modelFromAiger(aig3, propertyIndex);
+    model3->init.pop_back();
+    aiger_reset(aig3);
+
+    begin_time = clock();
+    IC3::IC3 ic3_3(*model3, ic3, 2);
+    rv = ic3_3.check();
+    cout << !rv << endl;
+    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC << endl;
+    cout << "Relaxed Inc2" << endl;
+    cout << "done" << endl;
+    cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
+    cout << !rv << endl;
+
+    aiger *aig4 = aiger_init();
+    const char *msg4 = aiger_open_and_read_from_file(aig4, file_name.c_str());
+    Model *model4 = modelFromAiger(aig4, propertyIndex);
+    model4->init.pop_back();
+    aiger_reset(aig4);
+
+    begin_time = clock();
+    IC3::IC3 ic3_4(*model4);
+    bool rv2 = IC3::check(*model4, ic3_4, verbose, basic, random);
+    cout << !rv2 << endl;
+    std::cout << float( clock () - begin_time ) /  CLOCKS_PER_SEC << endl;
+    cout << "Relaxed Instance" << endl;
+    cout << "done" << endl;
+    cout << "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
+
+    // print 0/1 according to AIGER standard
+//    cout << !rv2 << endl;
+
     delete model;
+//    delete model2;
+//    delete model3;
+//    delete model4;
 
     return 1;
 }
