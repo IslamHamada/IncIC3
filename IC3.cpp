@@ -265,6 +265,31 @@ namespace IC3 {
             }
         }
         propagate2();
+    bool IC3::reuse_previous_obligations2(PriorityQueue2 generalized_obligations) {
+        int reused_obligations = 0;
+        int total_obligations = generalized_obligations.size();
+        while (!generalized_obligations.empty()) {
+            PriorityQueue2::iterator obli = generalized_obligations.begin();
+            Obligation2 obl = *obli;
+            LitVec core;
+            size_t predi;
+            generalized_obligations.erase(obli);
+            // Is the obligation fulfilled?
+            if (consecution(obl.level, obl.generalized_core, obl.state, &core)) {
+                int level = obl.level;
+                do { ++level; } while (level <= k && consecution(level, core));
+                addCube(level, core);
+                reused_obligations++;
+            } else if (obl.level == 0) {
+//                cexState = predi;
+//                cout << "why" << endl;
+//                cout << "reused obligations: " << reused_obligations << " / " << total_obligations << endl;
+//                return false;
+            } else {
+            }
+        }
+        cout << "reused obligations: " << reused_obligations << " / " << total_obligations << endl;
+//        propagate2();
         return true;
     }
 
