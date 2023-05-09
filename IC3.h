@@ -268,12 +268,13 @@ namespace IC3 {
         PriorityQueue2 lifted_obligations;
 
         ////////////////////// first technique
-        void inc1(IC3& ic3);
+        void inc1(IC3& ic3, int variation);
         void propagate2();
         bool consecution2(size_t fi, const LitVec &latches, size_t succ = 0,
                          LitVec *core = NULL, size_t *pred = NULL,
                          bool orderedCore = false);
         bool reuse_previous_obligations(PriorityQueue2 lifted_obligations);
+        bool reuse_previous_obligations2(PriorityQueue2 generalized_obligations);
 
         ////////////////////// second technique
         void inc2(IC3& ic3);

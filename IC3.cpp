@@ -152,29 +152,41 @@ namespace IC3 {
 
     IC3::IC3(Model &_model, IC3& ic3, int technique) : IC3(_model) {
         states = ic3.states;
-        nextState = states.size() + 1;
+        nextState = states.size();
         Var::gvi = (states.size() > Var::gvi) ? states.size(): Var::gvi;
         baseCases(model);
         if(technique == 1){
-            inc1(ic3);
-        } else if (technique ==2){
+            inc1(ic3, 1);
+        } else if (technique == 12){
+            inc1(ic3, 2);
+        } else if (technique == 2) {
             inc2(ic3);
         }
+//        print_frames(frames, model.getVars());
     }
 
-    void IC3::inc1(IC3& ic3) {
-
-        cout << states.size() << endl;
+    void IC3::inc1(IC3& ic3, int variation) {
+        clock_t begin_time = clock();
         k = ic3.k;
-
         earliest = k + 1;
         trivial = false;
+        extend();
         for(int i = 0; i < states.size(); i++){
-            states[i].used = false;
+            states[i].used = true;
         }
-        print_previous_obligations(ic3.lifted_obligations, model.getVars());
-        reuse_previous_obligations(ic3.lifted_obligations);
+//        cout << ic3.lifted_obligations.size() << endl;
+//        cout << ic3.generalized_obligations.size() << endl;
+//        print_previous_obligations(ic3.lifted_obligations, model.getVars());
+        if(variation == 1)
+            reuse_previous_obligations(ic3.lifted_obligations);
+        else if (variation == 2)
+            reuse_previous_obligations2(ic3.generalized_obligations);
+//        print_frames(frames, model.getVars());
+//        propagate2();
+//        propagate2();
         k = 1;
+        float pre_time = float( clock () - begin_time ) /  CLOCKS_PER_SEC;
+        std::cout << "Preparation time: " << pre_time << endl;
     }
 
     void IC3::inc2(IC3& ic3) {
