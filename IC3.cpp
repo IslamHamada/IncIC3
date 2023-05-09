@@ -739,7 +739,9 @@ namespace IC3 {
             trivial = false;
             PriorityQueue pq;
             // enqueue main obligation and handle
-            pq.insert(Obligation(stateOf(frontier), k - 1, 1));
+            size_t CTI =  stateOf(frontier);
+            Obligation obl = Obligation(CTI, k - 1, 1);
+            pq.insert(obl);
             if (!handleObligations(pq))
                 return false;
             // finished with States for this iteration, so clean up
