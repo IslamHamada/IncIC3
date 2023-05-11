@@ -369,16 +369,23 @@ namespace IC3 {
 //                print_frames(frames, model.getVars());
             cout << "Strengthening: " << endl;
             if (!strengthen()) {
+#ifdef PRINT_LAST_FRAME || PRINT_FRAMES
                 print_frames(frames, model.getVars());
+#endif
                 return false;  // strengthen to remove bad successors
             }
+#ifdef PRINT_FRAMES
             print_frames(frames, model.getVars());
-            cout << "Propagation: " << endl;
+#endif
             if (propagate()) {
+#ifdef PRINT_LAST_FRAME || PRINT_FRAMES
                 print_frames(frames, model.getVars());
+#endif
                 return true;     // propagate clauses; check for proof
             }
+#ifdef PRINT_FRAMES
             print_frames(frames, model.getVars());
+#endif
             printStats();
             ++k;                              // increment frontier
 //                cout << "Iteration: " << endl;
@@ -764,10 +771,12 @@ namespace IC3 {
         while (!obls.empty()) {
             PriorityQueue::iterator obli = obls.begin();
             Obligation obl = *obli;
+#ifdef PRINT_OBLIGATIONS
             cout << "\t\tLevel: " << obl.level << " Depth: " << obl.depth << endl;
             cout << "\t\tCTI" << endl;
             cout << "\t\t";
             print_cube(state(obl.state).latches, model.getVars());
+#endif
             LitVec core;
             size_t predi;
             // Is the obligation fulfilled?
@@ -776,10 +785,11 @@ namespace IC3 {
                 // Yes, so generalize and possibly produce a new obligation
                 // at a higher level.
                 obls.erase(obli);
+#ifdef PRINT_OBLIGATIONS
                 cout << "\t\tcore" << endl;
                 cout << "\t\t";
                 print_cube(core, model.getVars());
-                Obligation2 lifted_obl(obl.state, obl.level, obl.depth, core);
+#endif
                 lifted_obligations.insert(lifted_obl);
                 size_t n = generalize(obl.level, core);
                 if (n <= k) {
