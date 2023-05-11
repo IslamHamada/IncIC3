@@ -293,6 +293,65 @@ namespace IC3 {
         return true;
     }
 
+    size_t IC3::stateOfInc(size_t old_state, size_t succ) {
+        // create state
+        size_t st = newState();
+        state(st).successor = succ;
+        MSLitVec assumps;
+        assumps.capacity(1 + 2 * (model.endInputs() - model.beginInputs())
+                         + (model.endLatches() - model.beginLatches()));
+        Minisat::Lit act = Minisat::mkLit(lifts->newVar());  // activation literal
+        assumps.push(act);
+//        print_vec_lit(assumps);
+        Minisat::vec<Minisat::Lit> cls;
+        cls.push(~act);
+        cls.push(notInvConstraints);  // successor must satisfy inv. constraint
+        if (succ == 0)
+            cls.push(~model.primedError());
+        else
+            for (LitVec::const_iterator i = state(succ).latches.begin();
+                 i != state(succ).latches.end(); ++i)
+                cls.push(model.primeLit(~*i));
+        lifts->addClause_(cls);
+        // extract and assert primary inputs
+        for (const Minisat::Lit& l : state(old_state).inputs){
+            assumps.push(l);
+        }
+//        // some properties include inputs, so assert primed inputs after
+//        for (VarVec::const_iterator i = model.beginInputs();
+//             i != model.endInputs(); ++i) {
+//            Minisat::lbool pval =
+//                    fr.consecution->modelValue(model.primeVar(*i).var());
+//            if (pval != Minisat::l_Undef) {
+//                assumps.push(model.primeLit(i->lit(pval == Minisat::l_False)));
+//            }
+//        }
+        int sz = assumps.size();
+        // extract and assert latches
+        LitVec latches;
+        for (const Minisat::Lit& l : state(old_state).latches){
+            latches.push_back(l);
+            assumps.push(l);
+        }
+
+        orderAssumps(assumps, false, sz);  // empirically found to be best choice
+        // State s, inputs i, transition relation T, successor t:
+        //   s & i & T & ~t' is unsat
+        // Core assumptions reveal a lifting of s.
+        ++nQuery;
+        startTimer();  // stats
+        bool rv = lifts->solve(assumps);
+        endTimer(satTime);
+        assert (!rv);
+        // obtain lifted latch set from unsat core
+        for (LitVec::const_iterator i = latches.begin(); i != latches.end(); ++i)
+            if (lifts->conflict.has(~*i))
+                state(st).latches.push_back(*i);  // record lifted latches
+        // deactivate negation of successor
+        lifts->releaseVar(~act);
+        return st;
+    }
+
     IC3::~IC3() {
         for (vector<Frame>::const_iterator i = frames.begin();
              i != frames.end(); ++i)

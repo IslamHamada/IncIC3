@@ -275,7 +275,7 @@ namespace IC3 {
                          bool orderedCore = false);
         bool reuse_previous_obligations(PriorityQueue2 lifted_obligations);
         bool reuse_previous_obligations2(PriorityQueue2 generalized_obligations);
-
+        size_t stateOfInc(size_t old_state, size_t succ = 0);
         ////////////////////// second technique
         void inc2(IC3& ic3);
     };
