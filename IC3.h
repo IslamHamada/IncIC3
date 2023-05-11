@@ -294,11 +294,16 @@ namespace IC3 {
                bool basic = false,    // simple inductive generalization
                bool random = false);  // random runs for statistical profiling
 
-    static void print_lit(Minisat::Lit l, VarVec vars) {
+    static void print_var(int v, VarVec vars) {
+//        cout << "(" << vars[v].name() << "," << vars[v].index() << "," << v << ")" << ", ";
+        cout << vars[v].name() << ", ";
+    }
+
+    static void print_lit(Minisat::Lit& l, VarVec vars) {
         if (Minisat::sign(l)) {
             cout << "!";
         }
-        cout << vars[var(l)].name() << ", ";
+        print_var(var(l), vars);
     }
 
     static void print_cube(LitVec s, VarVec vars) {
@@ -329,10 +334,10 @@ namespace IC3 {
         cout << "<<<<<<<<<<<<<<<<<<<<<<<<<" << endl;
     }
 
-    static void print_vec_lit(MSLitVec& s, VarVec vars) {
+    static void print_vec_lit(MSLitVec& s) {
         cout << "{";
         for (int i = 0; i < s.size(); i++) {
-            print_lit(s[i], vars);
+            cout << toInt(s[i]) << ", ";
         }
         cout << "}";
         cout << endl;
