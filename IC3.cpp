@@ -1012,4 +1012,44 @@ namespace IC3 {
         if (verbose) ic3.printStats();
         return rv;
     }
+
+    bool IC3::correctness() {
+        int first_empty_frame = 0;
+        for(int i = 1 ; i < frames.size(); i++){
+            if(frames[i].borderCubes.size() == 0){
+                first_empty_frame = i;
+                break;
+            }
+        }
+//        cout << "First empty frame index: " << first_empty_frame << endl;
+        Minisat::Solver* correctness_checker = model.newSolver();
+        for(int i = first_empty_frame + 1; i < frames.size(); i++){
+            for(LitVec cube: frames[i].borderCubes){
+                Minisat::vec<Minisat::Lit> cls;
+                for(int k = 0; k < cube.size(); k++){
+                    cls.push(~cube[k]);
+                }
+//                print_vec_lit(cls);
+                correctness_checker->addClause_(cls);
+            }
+        }
+//        cout << endl;
+        model.loadTransitionRelation(*correctness_checker);
+        bool bad_state_is_reachable = correctness_checker->solve(model.primedError());
+        bool inductive = true;
+        for(int i = first_empty_frame + 1; i < frames.size(); i++){
+//        for(int i = 1; i < 2; i++){
+            for(LitVec cube: frames[i].borderCubes){
+                MSLitVec assumps;
+                for(int k = 0; k < cube.size(); k++){
+                    assumps.push(model.primeLit(cube[k]));
+                }
+//                print_vec_lit(assumps);
+                inductive = inductive && !(correctness_checker->solve(assumps));
+            }
+        }
+        cout << bad_state_is_reachable << endl;
+        cout << inductive << endl;
+        return inductive && !bad_state_is_reachable;
+    }
 };

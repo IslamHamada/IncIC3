@@ -278,6 +278,8 @@ namespace IC3 {
         size_t stateOfInc(size_t old_state, size_t succ = 0);
         ////////////////////// second technique
         void inc2(IC3& ic3);
+    public:
+        bool correctness();
     };
 
     bool check(Model &model,
