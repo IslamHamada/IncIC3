@@ -337,6 +337,14 @@ namespace IC3 {
         cout << "}";
         cout << endl;
     }
-}
+
+    static void print_previous_obligations(PriorityQueue2 previous_obligatoins, VarVec vars){
+        for(Obligation2 obl : previous_obligatoins){
+            cout << "Level: " << obl.level << " Depth: " << obl.depth << endl;
+            cout << "CTI" << endl;
+            print_cube(obl.core, vars);
+            print_cube(obl.generalized_core, vars);
+        }
+    }
 
 #endif
